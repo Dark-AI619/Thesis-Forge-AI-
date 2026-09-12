@@ -211,6 +211,63 @@ def _get_client() -> genai.Client:
         )
     return genai.Client(api_key=api_key)
 
+def _split_thesis(
+    text: str,
+    chunk_size: int = 4000,
+    overlap: int = 400,
+):
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+        start += chunk_size - overlap
+
+    return chunks
+
+
+def _retrieve_thesis_context(
+    thesis_text: str,
+    query: str,
+    top_k: int = 4,
+) -> str:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    chunks = _split_thesis(thesis_text)
+
+    if not chunks:
+        return ""
+
+    if len(chunks) <= top_k:
+        return "\n\n---\n\n".join(chunks)
+
+    vectorizer = TfidfVectorizer(
+        stop_words="english",
+        max_features=12000,
+    )
+
+    matrix = vectorizer.fit_transform(
+        chunks + [query]
+    )
+
+    similarities = cosine_similarity(
+        matrix[-1],
+        matrix[:-1],
+    ).flatten()
+
+    indexes = similarities.argsort()[::-1][:top_k]
+
+    return "\n\n--- RELEVANT THESIS SECTION ---\n\n".join(
+        chunks[index]
+        for index in indexes
+    )
+
 
 def initialize_defense_state(thesis_text: str) -> Dict[str, Any]:
     """Create the initial state for a new thesis defense."""
@@ -270,7 +327,27 @@ def generate_next_question(
     client = _get_client()
 
     next_number = int(state.get("question_number", 0)) + 1
-    history = _history_text(state)
+    history = _history_text(state)retrieval_query = f"""
+Generate the next thesis defense question.
+
+Question number:
+{next_number}
+
+Previous defense:
+{history}
+
+Weaknesses:
+{state.get('weaknesses', [])}
+
+Contradictions:
+{state.get('contradictions', [])}
+"""
+
+relevant_thesis = _retrieve_thesis_context(
+    thesis_text=state["thesis_text"],
+    query=retrieval_query,
+    top_k=5,
+)
 
     prompt = f"""
 Conduct the next step of this thesis defense.
@@ -279,7 +356,7 @@ This will be question number {next_number}.
 
 THESIS:
 ================
-{state['thesis_text']}
+{state['relevant_thesis']}
 ================
 
 PREVIOUS DEFENSE HISTORY:
@@ -349,13 +426,23 @@ def evaluate_answer(
 
     selected_model = model or DEFAULT_MODEL
     client = _get_client()
+relevant_thesis = _retrieve_thesis_context(
+    thesis_text=state["thesis_text"],
+    query=f"""
+Question:
+{question}
 
+Candidate answer:
+{answer}
+""",
+    top_k=4,
+)
     prompt = f"""
 Evaluate the candidate's latest answer.
 
 THESIS:
 ================
-{state['thesis_text']}
+{state['relevant_thesis']}
 ================
 
 QUESTION:
@@ -463,13 +550,33 @@ def generate_final_defense_report(
         if state.get("scores")
         else 0
     )
+final_query = f"""
+Evaluate the overall thesis defense.
 
+Strengths:
+{state.get('strengths', [])}
+
+Weaknesses:
+{state.get('weaknesses', [])}
+
+Contradictions:
+{state.get('contradictions', [])}
+
+Defense history:
+{_history_text(state)}
+"""
+
+relevant_thesis = _retrieve_thesis_context(
+    thesis_text=state["thesis_text"],
+    query=final_query,
+    top_k=6,
+)
     prompt = f"""
 Produce the final thesis defense report.
 
 THESIS:
 ================
-{state['thesis_text']}
+{state['relevant_thesis']}
 ================
 
 FULL DEFENSE HISTORY:
