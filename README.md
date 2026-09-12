@@ -1,1 +1,1 @@
-# Thesis-Forge-AI-
+# ThesisApp
