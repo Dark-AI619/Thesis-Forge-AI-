@@ -2,11 +2,6 @@
 """
 ThesisForge AI - Analyst Mode
 File: analyst.py
-
-"""
-ThesisForge AI - Analyst Mode
-File: analyst.py
-
 Purpose:
 - Activate Analyst Mode with /analyst
 - Analyze the uploaded thesis
