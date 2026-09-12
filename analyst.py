@@ -3,20 +3,20 @@
 ThesisForge AI - Analyst Mode
 File: analyst.py
 
-Purpose:
+"Purpose:
 - Activate Analyst Mode with the slash command /analyst
 - Analyze a thesis/research paper
-- Compare it against current research and modern academic standards
-- Evaluate novelty, depth, clarity, methodology, impact, weaknesses
+- Evaluate novelty, depth, clarity, methodology, impact, and weaknesses
 - Return exactly five major sections
 - Give a final grade from 10-100
 - Give a pitch decision
+- Use chunked thesis analysis to avoid oversized requests
 
 Dependencies:
-    pip install streamlit google-genai python-dotenv
+    pip install streamlit groq python-dotenv scikit-learn numpy
 
 Environment variable:
-    GEMINI_API_KEY=your_key_here
+    GROQ_API_KEY=your_key_here
 
 Recommended integration:
     from analyst import is_analyst_command, run_analyst_mode
@@ -24,6 +24,7 @@ Recommended integration:
     if is_analyst_command(user_prompt):
         result = run_analyst_mode(thesis_text)
         st.markdown(result)
+"""
 """
 
 import os
