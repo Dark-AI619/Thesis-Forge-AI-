@@ -30,12 +30,13 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from groq import Groq
 
 load_dotenv()
-
-DEFAULT_MODEL = os.getenv("GEMINI_ANALYST_MODEL", "gemini-3.8-flash")
+DEFAULT_MODEL = os.getenv(
+    "GROQ_ANALYST_MODEL",
+    "openai/gpt-oss-120b"
+)
 
 ANALYST_SYSTEM_PROMPT = """
 You are THESISFORGE AI - ANALYST MODE.
@@ -267,14 +268,16 @@ def is_analyst_command(text: str) -> bool:
     stripped = text.strip().lower()
     return stripped == "/analyst" or stripped.startswith("/analyst ")
 
+def _get_client() -> Groq:
+    api_key = os.getenv("GROQ_API_KEY")
 
-def _get_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY is missing. Add it to your .env file or deployment secrets."
+            "GROQ_API_KEY is missing. Add it to your .env file or deployment secrets."
         )
-    return genai.Client(api_key=api_key)
+
+    return Groq(api_key=api_key)
+
 
 
 def _split_for_analysis(
@@ -378,24 +381,32 @@ THESIS SECTION {index}:
 
 Return a concise structured assessment.
 """
+response = client.chat.completions.create(
+    model=selected_model,
+    messages=[
+        {
+            "role": "system",
+            "content": ANALYST_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": chunk_prompt,
+        },
+    ],
+    temperature=0.15,
+    max_tokens=1800,
+)
 
-        response = client.models.generate_content(
-            model=selected_model,
-            contents=chunk_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.15,
-                max_output_tokens=1800,
-            ),
-        )
+content = response.choices[0].message.content
 
-        if response.text:
-            chunk_findings.append(
-                f"""
+if content:
+    chunk_findings.append(
+        f"""
 ===== SECTION {index} ANALYSIS =====
 
-{response.text}
+{content}
 """
-            )
+    )
 
     if not chunk_findings:
         raise RuntimeError(
@@ -452,27 +463,30 @@ NO - REWORK REQUIRED
 ==================================================
 """
 
-    final_response = client.models.generate_content(
-        model=selected_model,
-        contents=final_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=ANALYST_SYSTEM_PROMPT,
-            tools=[
-                types.Tool(
-                    google_search=types.GoogleSearch()
-                )
-            ],
-            temperature=0.2,
-            max_output_tokens=10000,
-        ),
+final_response = client.chat.completions.create(
+    model=selected_model,
+    messages=[
+        {
+            "role": "system",
+            "content": ANALYST_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": final_prompt,
+        },
+    ],
+    temperature=0.2,
+    max_tokens=5000,
+)
+
+content = final_response.choices[0].message.content
+
+if not content:
+    raise RuntimeError(
+        "Groq returned an empty Analyst Mode response."
     )
 
-    if not final_response.text:
-        raise RuntimeError(
-            "Gemini returned an empty Analyst Mode response."
-        )
-
-    return final_response.text
+return content
 
 def render_analyst_mode(thesis_text: str) -> None:
     """
