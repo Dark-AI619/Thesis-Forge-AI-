@@ -3,28 +3,17 @@
 ThesisForge AI - Analyst Mode
 File: analyst.py
 
-"Purpose:
-- Activate Analyst Mode with the slash command /analyst
-- Analyze a thesis/research paper
-- Evaluate novelty, depth, clarity, methodology, impact, and weaknesses
-- Return exactly five major sections
-- Give a final grade from 10-100
-- Give a pitch decision
-- Use chunked thesis analysis to avoid oversized requests
-
-Dependencies:
-    pip install streamlit groq python-dotenv scikit-learn numpy
-
-Environment variable:
-    GROQ_API_KEY=your_key_here
-
-Recommended integration:
-    from analyst import is_analyst_command, run_analyst_mode
-
-    if is_analyst_command(user_prompt):
-        result = run_analyst_mode(thesis_text)
-        st.markdown(result)
 """
+ThesisForge AI - Analyst Mode
+File: analyst.py
+
+Purpose:
+- Activate Analyst Mode using /analyst
+- Analyze an uploaded thesis
+- Evaluate quality, methodology, depth, novelty, impact, and weaknesses
+- Produce exactly five major sections
+- Give a final score from 10 to 100
+- Give a final pitch decision
 """
 
 import os
@@ -34,6 +23,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 load_dotenv()
+
 DEFAULT_MODEL = os.getenv(
     "GROQ_ANALYST_MODEL",
     "openai/gpt-oss-120b"
