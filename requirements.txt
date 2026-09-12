@@ -1,2 +1,5 @@
 streamlit
 groq
+python-dotenv
+PyMuPDF
+google-genai
