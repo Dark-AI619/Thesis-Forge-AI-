@@ -172,50 +172,117 @@ def groq_client() -> Groq:
         )
 
     return Groq(api_key=api_key)
-
-
-def thesis_context_for_chat(thesis_text: str) -> str:
+def split_thesis_into_chunks(text: str, chunk_size: int = 4000, overlap: int = 400):
     """
-    Keep the general assistant grounded in the uploaded thesis.
-
-    For a hackathon MVP this passes extracted thesis text directly.
-    The dedicated RAG layer can later replace this helper without changing
-    the slash-command routing.
+    Split thesis into overlapping text chunks.
+    Character-based chunking keeps the implementation lightweight.
     """
-    return thesis_text
+    if not text:
+        return []
+
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+        start += chunk_size - overlap
+
+    return chunks
+
+
+def retrieve_relevant_chunks(
+    thesis_text: str,
+    query: str,
+    top_k: int = 4,
+) -> str:
+    """
+    Retrieve only the thesis chunks most relevant to the user's query.
+    Uses TF-IDF + cosine similarity.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    chunks = split_thesis_into_chunks(thesis_text)
+
+    if not chunks:
+        return ""
+
+    # If the thesis is very small, simply return it.
+    if len(chunks) <= top_k:
+        return "\n\n---\n\n".join(chunks)
+
+    vectorizer = TfidfVectorizer(
+        stop_words="english",
+        max_features=12000,
+    )
+
+    matrix = vectorizer.fit_transform(chunks + [query])
+
+    chunk_vectors = matrix[:-1]
+    query_vector = matrix[-1]
+
+    similarities = cosine_similarity(
+        query_vector,
+        chunk_vectors,
+    ).flatten()
+
+    best_indexes = similarities.argsort()[::-1][:top_k]
+
+    selected_chunks = [
+        chunks[index]
+        for index in best_indexes
+    ]
+
+    return "\n\n--- RELEVANT THESIS SECTION ---\n\n".join(
+        selected_chunks
+    )
 
 
 def ask_groq(
     user_text: str,
     thesis_text: str,
-    previous_messages: List[Dict[str, str]],
+    previous_messages,
 ) -> str:
-    """Send a thesis-grounded chat request to Groq."""
+
     client = groq_client()
 
-    messages: List[Dict[str, str]] = [
+    messages = [
         {
             "role": "system",
             "content": ASSISTANT_SYSTEM_PROMPT,
         }
     ]
 
+    # IMPORTANT:
+    # Retrieve only relevant thesis sections.
     if thesis_text:
+        relevant_context = retrieve_relevant_chunks(
+            thesis_text=thesis_text,
+            query=user_text,
+            top_k=4,
+        )
+
         messages.append(
             {
                 "role": "system",
                 "content": (
-                    "The following is the user's uploaded thesis. "
-                    "Use it as the primary source for thesis-specific answers.\n\n"
-                    "===== THESIS START =====\n"
-                    f"{thesis_context_for_chat(thesis_text)}"
-                    "\n===== THESIS END ====="
+                    "Below are the most relevant sections retrieved "
+                    "from the user's uploaded thesis.\n\n"
+                    "Answer thesis-specific questions using this evidence.\n\n"
+                    "===== RETRIEVED THESIS CONTEXT =====\n"
+                    f"{relevant_context}\n"
+                    "===== END CONTEXT ====="
                 ),
             }
         )
 
-    # Keep recent conversation context without endlessly resending the entire UI history.
-    for message in previous_messages[-8:]:
+    # Keep only recent chat history.
+    for message in previous_messages[-6:]:
         if message["role"] in {"user", "assistant"}:
             messages.append(
                 {
@@ -224,21 +291,29 @@ def ask_groq(
                 }
             )
 
-    messages.append({"role": "user", "content": user_text})
+    messages.append(
+        {
+            "role": "user",
+            "content": user_text,
+        }
+    )
 
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=messages,
         temperature=0.3,
-        max_tokens=3000,
+        max_tokens=2500,
     )
 
     content = response.choices[0].message.content
 
     if not content:
-        raise RuntimeError("Groq returned an empty response.")
+        raise RuntimeError(
+            "Groq returned an empty response."
+        )
 
     return content
+
 
 
 def add_message(role: str, content: str) -> None:
