@@ -33,12 +33,14 @@ import os
 from typing import Dict, List, Optional, Any
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from groq import Groq
 
 load_dotenv()
 
-DEFAULT_MODEL = os.getenv("GEMINI_DEFENSE_MODEL", "gemini-3.8-flash")
+DEFAULT_MODEL = os.getenv(
+    "GROQ_DEFENSE_MODEL",
+    "openai/gpt-oss-120b"
+)
 
 DEFENSE_SYSTEM_PROMPT = """
 You are THESISFORGE AI - DEFENSE MODE.
@@ -202,12 +204,15 @@ def is_defense_command(text: str) -> bool:
     stripped = text.strip().lower()
     return stripped == "/defense" or stripped.startswith("/defense ")
 
+def _get_client() -> Groq:
+    api_key = os.getenv("GROQ_API_KEY")
 
-def _get_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY is missing. Add it to your .env file or deployment secrets."
+            "GROQ_API_KEY is missing. Add it to your .env file or deployment secrets."
+        )
+
+    return Groq(api_key=api_key)
         )
     return genai.Client(api_key=api_key)
 
@@ -473,27 +478,37 @@ Rules:
 - no markdown
 - no text outside the JSON
 """
+response = client.chat.completions.create(
+    model=selected_model,
+    messages=[
+        {
+            "role": "system",
+            "content": DEFENSE_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": prompt,
+        },
+    ],
+    temperature=0.15,
+    max_tokens=1500,
+    response_format={"type": "json_object"},
+)
 
-    response = client.models.generate_content(
-        model=selected_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=DEFENSE_SYSTEM_PROMPT,
-            temperature=0.15,
-            max_output_tokens=1500,
-            response_mime_type="application/json",
-        ),
+content = response.choices[0].message.content
+
+if not content:
+    raise RuntimeError(
+        "Groq returned an empty answer evaluation."
     )
 
-    if not response.text:
-        raise RuntimeError("Gemini returned an empty answer evaluation.")
+try:
+    evaluation = json.loads(content)
 
-    try:
-        evaluation = json.loads(response.text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Gemini returned invalid JSON during answer evaluation: {exc}"
-        ) from exc
+except json.JSONDecodeError as exc:
+    raise RuntimeError(
+        f"Groq returned invalid JSON during answer evaluation: {exc}"
+    ) from exc
 
     score = int(evaluation.get("score", 1))
     score = max(1, min(score, 10))
@@ -604,22 +619,31 @@ supports a slightly different examiner judgment.
 
 Return markdown.
 """
+response = client.chat.completions.create(
+    model=selected_model,
+    messages=[
+        {
+            "role": "system",
+            "content": DEFENSE_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": prompt,
+        },
+    ],
+    temperature=0.2,
+    max_tokens=4000,
+)
 
-    response = client.models.generate_content(
-        model=selected_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=DEFENSE_SYSTEM_PROMPT,
-            temperature=0.2,
-            max_output_tokens=5000,
-        ),
+content = response.choices[0].message.content
+
+if not content:
+    raise RuntimeError(
+        "Groq returned an empty final defense report."
     )
 
-    if not response.text:
-        raise RuntimeError("Gemini returned an empty final defense report.")
-
-    state["complete"] = True
-    return response.text
+state["complete"] = True
+return content
 
 
 def render_defense_mode(thesis_text: str) -> None:
