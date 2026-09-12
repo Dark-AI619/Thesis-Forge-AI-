@@ -3,3 +3,5 @@ groq
 python-dotenv
 PyMuPDF
 google-genai
+scikit-learn
+numpy
