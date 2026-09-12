@@ -277,64 +277,202 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+def _split_for_analysis(
+    text: str,
+    chunk_size: int = 7000,
+    overlap: int = 500,
+):
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+        start += chunk_size - overlap
+
+    return chunks
+
+
 def run_analyst_mode(
     thesis_text: str,
     model: Optional[str] = None,
 ) -> str:
     """
-    Run full ThesisForge Analyst Mode.
+    Hierarchical thesis analysis.
 
-    Args:
-        thesis_text:
-            Extracted thesis/research paper text.
-        model:
-            Optional Gemini model override.
+    Instead of sending the entire thesis to Gemini at once:
 
-    Returns:
-        Markdown report with exactly five major sections.
+        thesis
+          ↓
+        chunks
+          ↓
+        individual academic assessments
+          ↓
+        condensed evidence
+          ↓
+        final five-part Analyst report
+
+    This prevents huge-context failures.
     """
+
     if not thesis_text or not thesis_text.strip():
-        raise ValueError("No thesis text was provided for analysis.")
+        raise ValueError(
+            "No thesis text was provided for analysis."
+        )
 
     selected_model = model or DEFAULT_MODEL
     client = _get_client()
 
-    user_prompt = f"""
-Analyze the thesis below using THESISFORGE AI - ANALYST MODE.
+    chunks = _split_for_analysis(
+        thesis_text,
+        chunk_size=7000,
+        overlap=500,
+    )
 
-Instructions:
-- Treat the thesis as user-provided material.
-- Verify external claims with current research where possible.
-- Compare the thesis against current academic standards.
-- Investigate whether similar research already exists.
-- Evaluate novelty carefully.
-- Never fabricate citations.
-- Return exactly the required five sections.
-- End with a grade out of 100 and the required pitch decision.
+    chunk_findings = []
 
-================ THESIS START ================
-{thesis_text}
-================= THESIS END =================
+    # Prevent extreme documents from creating hundreds of requests.
+    max_chunks = 25
+    chunks = chunks[:max_chunks]
+
+    for index, chunk in enumerate(chunks, start=1):
+
+        chunk_prompt = f"""
+You are performing one stage of a larger academic thesis review.
+
+Analyze ONLY the thesis section below.
+
+Do NOT produce the final thesis grade yet.
+
+Extract concise academic findings concerning:
+
+- research purpose
+- arguments
+- methodology
+- evidence
+- results
+- originality clues
+- strengths
+- weaknesses
+- unsupported claims
+- clarity
+- limitations
+- citations/literature
+- contribution
+- anything an examiner should know
+
+If something cannot be determined from this section,
+say that it is unavailable.
+
+Do not invent papers, citations, statistics, authors or findings.
+
+THESIS SECTION {index}:
+
+================
+{chunk}
+================
+
+Return a concise structured assessment.
 """
 
-    config = types.GenerateContentConfig(
-        system_instruction=ANALYST_SYSTEM_PROMPT,
-        tools=[types.Tool(google_search=types.GoogleSearch())],
-        temperature=0.2,
-        max_output_tokens=12000,
-    )
+        response = client.models.generate_content(
+            model=selected_model,
+            contents=chunk_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.15,
+                max_output_tokens=1800,
+            ),
+        )
 
-    response = client.models.generate_content(
+        if response.text:
+            chunk_findings.append(
+                f"""
+===== SECTION {index} ANALYSIS =====
+
+{response.text}
+"""
+            )
+
+    if not chunk_findings:
+        raise RuntimeError(
+            "No usable thesis analysis was generated."
+        )
+
+    combined_findings = "\n".join(chunk_findings)
+
+    final_prompt = f"""
+You are now performing the FINAL ThesisForge Analyst Mode evaluation.
+
+Below are structured analyses made from all major portions of the thesis.
+
+Use these findings as evidence.
+
+You may use Google Search to compare the thesis against:
+- modern research
+- current methodologies
+- established research
+- current standards
+
+Do NOT fabricate citations or research.
+
+Return EXACTLY the five sections required by the ThesisForge Analyst Mode
+system instructions.
+
+The final report MUST include:
+
+1. QUALITY OF THE THESIS
+
+2. HISTORY AND MODERN STANDARDS
+
+3. IMPACT OF THE THESIS
+
+4. WEAKNESSES AND AREAS FOR IMPROVEMENT
+
+5. FINAL GRADE AND PITCH DECISION
+
+The final grade must be between 10 and 100.
+
+The pitch decision must be exactly one of:
+
+YES - PITCH IT
+
+YES, BUT IMPROVE IT FIRST
+
+NO - REWORK REQUIRED
+
+
+================ SECTION ANALYSES ================
+
+{combined_findings}
+
+==================================================
+"""
+
+    final_response = client.models.generate_content(
         model=selected_model,
-        contents=user_prompt,
-        config=config,
+        contents=final_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=ANALYST_SYSTEM_PROMPT,
+            tools=[
+                types.Tool(
+                    google_search=types.GoogleSearch()
+                )
+            ],
+            temperature=0.2,
+            max_output_tokens=10000,
+        ),
     )
 
-    if not response.text:
-        raise RuntimeError("Gemini returned an empty Analyst Mode response.")
+    if not final_response.text:
+        raise RuntimeError(
+            "Gemini returned an empty Analyst Mode response."
+        )
 
-    return response.text
-
+    return final_response.text
 
 def render_analyst_mode(thesis_text: str) -> None:
     """
