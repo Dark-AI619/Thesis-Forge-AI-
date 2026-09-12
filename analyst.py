@@ -8,19 +8,21 @@ ThesisForge AI - Analyst Mode
 File: analyst.py
 
 Purpose:
-- Activate Analyst Mode using /analyst
-- Analyze an uploaded thesis
+- Activate Analyst Mode with /analyst
+- Analyze the uploaded thesis
 - Evaluate quality, methodology, depth, novelty, impact, and weaknesses
 - Produce exactly five major sections
-- Give a final score from 10 to 100
+- Give a final grade from 10 to 100
 - Give a final pitch decision
 """
 
 import os
-from typing import Optional
+from typing import Optional, List
 
 from dotenv import load_dotenv
 from groq import Groq
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
 
