@@ -29,7 +29,11 @@ import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
 
-from analyst import is_analyst_command, run_analyst_mode
+from analyst import (
+    is_analyst_command,
+    run_analyst_mode,
+)
+
 from defense import (
     evaluate_answer,
     generate_final_defense_report,
